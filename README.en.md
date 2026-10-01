@@ -1,4 +1,4 @@
-# AI Companion Chat
+# anime-chat
 
 A text-based chat app with deeply customizable AI characters and permanent memory.
 
