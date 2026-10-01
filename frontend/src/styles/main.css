@@ -1,0 +1,45 @@
+/* 全局样式与主题变量（主色 ≤3 种 + 中性色，CLAUDE.md B 节） */
+:root {
+  /* 中性色 */
+  --bg: #0f1115;
+  --surface: #171a21;
+  --surface-2: #1f242e;
+  --border: #2a303c;
+  --text: #e6e9ef;
+  --text-dim: #8b93a3;
+
+  /* 主色（1 个 accent，严格 ≤3 种） */
+  --accent: #5b8cff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+/* 滚动条：克制、不抢戏 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}

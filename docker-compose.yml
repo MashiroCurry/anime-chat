@@ -1,0 +1,51 @@
+# M0 基础设施：PostgreSQL(pgvector) + Redis + new-api 网关
+# 目录名是中文，compose 无法用作项目名，故显式指定
+name: companion
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: companion-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: companion
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # init 脚本：确保 vector 扩展已启用
+      - ./backend/scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d companion"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: companion-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # new-api 网关：M0 仅起好待用，不上关键路径（后端直连 DeepSeek）
+  # 默认 SQLite（/data/one-api.db），无需 SQL_DSN；首次启动后进管理后台
+  # （默认 http://localhost:3000，账号 root / 密码 123456）配置上游渠道与令牌
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: companion-new-api
+    ports:
+      - "3000:3000"
+    volumes:
+      - newapi-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  newapi-data:

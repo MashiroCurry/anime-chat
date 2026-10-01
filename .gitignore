@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 密钥与本地环境（绝不入库）
+密钥.txt
+key.txt
+.env
+.env.*
+!.env.example
+
+# Node / 前端（阶段 B 起用）
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 日志与临时文件
+*.log

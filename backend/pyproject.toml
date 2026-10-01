@@ -1,0 +1,38 @@
+[project]
+name = "ai-companion-backend"
+version = "0.1.0"
+description = "AI 伴侣应用后端（FastAPI + OpenAI 兼容 LLM + 记忆层）"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.142.2",
+    "uvicorn[standard]==0.54.0",
+    "websockets==17.1",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy[asyncio]==2.1.1",
+    "asyncpg==0.31.0",
+    "psycopg[binary]==3.3.6",
+    "psycopg-pool==3.3.2",
+    "alembic==1.20.0",
+    "openai==3.22.1",
+    "httpx==0.28.1",
+    "loguru==0.7.3",
+    "orjson==3.12.0",
+    "tenacity==9.1.4",
+    "pgvector==0.5.0",
+    "mem0ai==2.2.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "aiosqlite==0.22.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
