@@ -13,9 +13,16 @@ export default defineConfig({
     }),
   ],
   server: {
+    // 监听所有网卡：手机连同一 Wi-Fi 时用局域网 IP 访问。
+    // 默认只绑 127.0.0.1，手机连不上。
+    host: '0.0.0.0',
     port: 5173,
+    // 端口被占用时直接报错，不静默换到 5174 —— 否则手机上会输错端口
+    strictPort: true,
     proxy: {
-      // 开发期把 /api 代理到后端，避免跨域
+      // 开发期把 /api 代理到后端，避免跨域。
+      // target 用 127.0.0.1 是对的：代理发生在电脑本机，
+      // 手机只跟 5173 打交道，不需要直连 8000，也就不需要 CORS。
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

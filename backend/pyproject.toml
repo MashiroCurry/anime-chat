@@ -34,5 +34,22 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+# 必须显式指定：项目名 ai-companion-backend 对应的目录名是 ai_companion_backend，
+# 而代码在 app/ 下，hatchling 猜不出来就会报
+# "no directory that matches the name of your project" 让 uv sync 中断。
+#
+# 装成可编辑包不是多余的：alembic 的入口脚本不会把 CWD 加进 sys.path，
+# 只有 app 作为包被安装，`uv run alembic upgrade head` 才能 import 到 app。
+packages = ["app"]
+
+[tool.uv]
+# 包源：清华镜像。写进配置而不是靠临时环境变量，
+# 否则 uv sync 会拿默认源重新解析，把 uv.lock 里的源地址整片改写。
+[[tool.uv.index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

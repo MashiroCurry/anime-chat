@@ -32,7 +32,6 @@
 | M0 | 骨架 + 最小对话闭环（流式） | ✅ |
 | M1a | 角色系统（角色卡 CRUD / 导入） | ✅ |
 | M1b | 长期记忆（mem0 + pgvector） | ✅ |
-| ~~M2~~ | ~~Live2D 渲染~~ | ❌ 已放弃 |
 | M3 | 记忆管理面板 + 性能对齐 | ⏳ 待做 |
 | M4 | 内容审核 / 部署 / 微信接入 | ⏳ 待做 |
 
@@ -148,6 +147,14 @@ API 密钥只存在**浏览器 localStorage** 里，通过 WebSocket 连接的 `
 
 - **Docker Desktop**（跑 PostgreSQL / Redis / new-api）
 - **Python 3.11+** 与 [uv](https://github.com/astral-sh/uv)
+
+  ```bash
+  # Windows (PowerShell)
+  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
 - **Node.js 18+**
 
 ### 1. 启动基础设施
@@ -168,8 +175,8 @@ cd backend
 # 安装依赖（uv 会自动创建 .venv）
 uv sync
 
-# 配置环境变量
-cp ../.env.example .env
+# 配置环境变量（仅首次。已存在就跳过，否则会覆盖掉里面已填的密钥）
+[ -f .env ] || cp ../.env.example .env
 # 编辑 .env，填入 LLM_API_KEY（仅本地开发兜底用）和 EMBEDDING_API_KEY
 
 # 执行数据库迁移
@@ -192,6 +199,41 @@ npm run dev
 打开 <http://localhost:5173>，在设置抽屉里填入你的 API 密钥即可开始聊天。
 
 前端开发服务器已配置代理，`/api`（含 WebSocket）转发到 `http://127.0.0.1:8000`。
+
+### 一键启动（可选，替代步骤 2–3）
+
+配好 `backend/.env` 后，可以用脚本一次拉起后端和前端：
+
+```bash
+bash scripts/dev.sh
+```
+
+脚本会检测端口占用（已占用则跳过，方便只重启其中一个），并打印出手机可访问的局域网地址。`Ctrl+C` 停止全部。
+
+### 手机 / 局域网访问
+
+vite 已配置监听 `0.0.0.0`，手机连同一个 Wi-Fi 即可访问：
+
+```bash
+# 查看电脑的局域网 IP（找「无线局域网适配器 WLAN」下的 IPv4 地址）
+ipconfig
+```
+
+手机浏览器打开 `http://<局域网IP>:5173`，例如 `http://192.168.0.107:5173`。
+
+注意三点：
+
+- 端口是 **5173**（前端），不是 8000——后端不直接暴露到局域网
+- 协议是 **http**，不是 https
+- 手机和电脑必须在**同一个** Wi-Fi（访客网络会隔离设备，连不通）
+
+后端不需要监听 `0.0.0.0`，也不需要配 CORS：手机只跟 vite 打交道，`/api`（含 WebSocket）由 vite 在电脑本机代理到 `127.0.0.1:8000`，对浏览器而言始终是同源请求。
+
+手机连不上时按顺序排查：
+
+1. `netstat -ano | findstr :5173` 确认监听地址是 `0.0.0.0` 而不是 `127.0.0.1`
+2. 确认手机和电脑在同一个 Wi-Fi
+3. Windows 防火墙若为开启状态，首次运行 Node 时需允许「专用网络」访问
 
 ---
 
@@ -310,6 +352,8 @@ npm run dev
 │   │   ├── api/                 # REST + WS 客户端
 │   │   └── views/CharacterEditor.vue
 │   └── e2e/                     # Playwright 截图脚本
+├── scripts/
+│   └── dev.sh                   # 一键启动后端 + 前端，并打印手机访问地址
 ├── screenshots/                 # 各里程碑验证截图
 ├── docker-compose.yml
 ├── CLAUDE.md                    # 项目约束（给 AI 编码工具看）

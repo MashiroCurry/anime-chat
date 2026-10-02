@@ -149,6 +149,14 @@ User input
 
 - **Docker Desktop** (for PostgreSQL / Redis / new-api)
 - **Python 3.11+** with [uv](https://github.com/astral-sh/uv)
+
+  ```bash
+  # Windows (PowerShell)
+  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
 - **Node.js 18+**
 
 ### 1. Start infrastructure
@@ -169,8 +177,9 @@ cd backend
 # Install dependencies (uv creates .venv automatically)
 uv sync
 
-# Configure environment
-cp ../.env.example .env
+# Configure environment (first run only — skip if .env exists, or you'll
+# overwrite the keys already in it)
+[ -f .env ] || cp ../.env.example .env
 # Edit .env, set LLM_API_KEY (local fallback only) and EMBEDDING_API_KEY
 
 # Run migrations
@@ -193,6 +202,41 @@ npm run dev
 Open <http://localhost:5173> and enter your API key in the settings drawer to start chatting.
 
 The dev server proxies `/api` (including WebSockets) to `http://127.0.0.1:8000`.
+
+### One-command startup (optional, replaces steps 2–3)
+
+Once `backend/.env` is in place, start both processes with:
+
+```bash
+bash scripts/dev.sh
+```
+
+The script skips any port that's already in use (so you can restart just one side) and prints the LAN address for phone access. `Ctrl+C` stops both.
+
+### Phone / LAN access
+
+Vite is configured to listen on `0.0.0.0`, so a phone on the same Wi-Fi can reach it:
+
+```bash
+# Find your LAN IP (look for the IPv4 address under your Wi-Fi adapter)
+ipconfig
+```
+
+Open `http://<LAN-IP>:5173` on the phone, e.g. `http://192.168.0.107:5173`.
+
+Three things to note:
+
+- The port is **5173** (frontend), not 8000 — the backend is not exposed to the LAN
+- The scheme is **http**, not https
+- Phone and computer must be on the **same** Wi-Fi (guest networks isolate devices)
+
+The backend does not need to listen on `0.0.0.0`, and no CORS setup is required: the phone only ever talks to Vite, which proxies `/api` (including WebSockets) to `127.0.0.1:8000` on the host machine — so from the browser's point of view every request is same-origin.
+
+If the phone can't connect, check in order:
+
+1. `netstat -ano | findstr :5173` — confirm the listen address is `0.0.0.0`, not `127.0.0.1`
+2. Confirm phone and computer are on the same Wi-Fi
+3. If Windows Firewall is on, allow Node through on private networks the first time it runs
 
 ---
 
@@ -311,6 +355,8 @@ Prefix: `/api/v1`.
 │   │   ├── api/                 # REST + WS clients
 │   │   └── views/CharacterEditor.vue
 │   └── e2e/                     # Playwright screenshot scripts
+├── scripts/
+│   └── dev.sh                   # start backend + frontend, print the phone-accessible URL
 ├── screenshots/                 # per-milestone verification screenshots
 ├── docker-compose.yml
 ├── CLAUDE.md                    # project constraints (for AI coding tools)
