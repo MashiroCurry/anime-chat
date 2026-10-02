@@ -3,6 +3,8 @@
 验证核心层只依赖 MessageChannel 接口，正确产出流式输出、载入角色卡、注入记忆。
 """
 
+import asyncio
+
 import pytest
 
 from app.core.messaging.channel import MessageCallback
@@ -53,6 +55,22 @@ class FakeMemory:
         return self._search
 
     async def add(self, messages, *, user_id, character_id=None):
+        self.added.append((messages, user_id, character_id))
+
+
+class ConcurrencyTrackingMemory(FakeMemory):
+    """记录 add 的最大并发数，用于验证同角色抽取被串行化。"""
+
+    def __init__(self):
+        super().__init__()
+        self._active = 0
+        self.max_active = 0
+
+    async def add(self, messages, *, user_id, character_id=None):
+        self._active += 1
+        self.max_active = max(self.max_active, self._active)
+        await asyncio.sleep(0.02)  # 拉开窗口，无锁时并发会叠加
+        self._active -= 1
         self.added.append((messages, user_id, character_id))
 
 
@@ -208,3 +226,22 @@ async def test_multi_turn_no_duplicate():
     user_msgs = [m for m in llm.messages if m["role"] == "user"]
     contents = [m["content"] for m in user_msgs]
     assert contents.count("你在吗") == 1, f"本轮消息重复: {contents}"
+
+
+@pytest.mark.anyio
+async def test_extraction_serialized_per_character():
+    """同角色的记忆抽取应串行化：两条消息的 add 从未并发执行。"""
+    cid = await _create_character("小明", "测试")
+    mem = ConcurrencyTrackingMemory()
+    core = ChatCoreService(FakeLLM(["好"]), mem)
+    channel = FakeChannel()
+
+    # 同一角色连发两条消息，各自触发一次 fire-and-forget 抽取
+    await core.handle_message(_msg(cid), "sk-test", channel)
+    await core.handle_message(_msg(cid), "sk-test", channel)
+
+    # 等抽取任务全部跑完
+    await asyncio.gather(*list(core._extract_tasks))
+
+    assert len(mem.added) == 2
+    assert mem.max_active == 1, f"抽取发生了并发，max_active={mem.max_active}"

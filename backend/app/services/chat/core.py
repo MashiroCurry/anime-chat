@@ -92,6 +92,10 @@ class ChatCoreService:
         self._llm = llm
         self._memory = memory
         self._reply_handlers: list[ReplyHandler] = []
+        # 记忆抽取：按 character_id 串行化，防并发写重复记忆
+        self._extract_locks: dict[str, asyncio.Lock] = {}
+        # 持引用防 GC：asyncio.create_task 不存引用会被中途回收（Python 官方警告）
+        self._extract_tasks: set[asyncio.Task] = set()
 
     def on_reply(self, handler: ReplyHandler) -> None:
         """注册「回复就绪」回调。处理完一条消息后，把完整结果抛给监听者。
@@ -100,6 +104,30 @@ class ChatCoreService:
         需要完整回复的渠道（微信异步推送）监听此回调。
         """
         self._reply_handlers.append(handler)
+
+    def _spawn_extraction(self, user_text: str, assistant_text: str, character_id: str) -> None:
+        """投递记忆抽取任务：同角色串行化，任务持引用防 GC。"""
+        lock = self._extract_locks.setdefault(character_id, asyncio.Lock())
+        task = asyncio.create_task(
+            self._extract(lock, user_text, assistant_text, character_id)
+        )
+        self._extract_tasks.add(task)
+        task.add_done_callback(self._extract_tasks.discard)
+
+    async def _extract(
+        self, lock: asyncio.Lock, user_text: str, assistant_text: str, character_id: str
+    ) -> None:
+        """在锁内执行抽取，保证同一角色的抽取不并发。"""
+        async with lock:
+            await _safe_add(
+                self._memory,
+                [
+                    {"role": "user", "content": user_text},
+                    {"role": "assistant", "content": assistant_text},
+                ],
+                DEFAULT_OWNER_ID,
+                character_id,
+            )
 
     async def handle_message(
         self, msg: UnifiedMessage, api_key: str, channel: MessageChannel
@@ -214,16 +242,7 @@ class ChatCoreService:
             except Exception:  # noqa: BLE001
                 logger.exception("on_reply 处理器异常")
 
-        # 记忆抽取投递（写路径）：fire-and-forget，不阻塞
+        # 记忆抽取投递（写路径）：fire-and-forget，不阻塞主流程。
+        # 可靠性：同角色串行化（防并发写重复），任务持引用（防 GC 中途消失）。
         if settings.memory_extract_enabled and msg.character_id:
-            asyncio.create_task(
-                _safe_add(
-                    self._memory,
-                    [
-                        {"role": "user", "content": msg.content},
-                        {"role": "assistant", "content": full_text},
-                    ],
-                    DEFAULT_OWNER_ID,
-                    msg.character_id,
-                )
-            )
+            self._spawn_extraction(msg.content, full_text, msg.character_id)
