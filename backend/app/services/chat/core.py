@@ -6,6 +6,7 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import select
@@ -37,6 +38,16 @@ _MEMORY_SEARCH_TIMEOUT = 1.5
 # 记忆注入预算：每条截断字数 / 总预算（中文字符数，约对应 ~800 token）
 _MEMORY_ITEM_MAX_CHARS = 200
 _MEMORY_BUDGET_CHARS = 600
+
+# 时间感知：时区固定 UTC+8。中国自 1991 年起无夏令时，固定偏移与 Asia/Shanghai 完全等价；
+# 不依赖宿主机 TZ，容器内也一致（用 datetime.now().astimezone() 则容器默认 UTC，会静默差 8 小时）。
+# 若不在 UTC+8，改这一行即可。
+_TZ = timezone(timedelta(hours=8))
+
+# 「距上次对话」超过该间隔才写入提示词，避免每次开口都复述「刚聊过」
+_TIME_GAP_NOTABLE_SECONDS = 6 * 3600
+
+_WEEKDAYS = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
 
 
 def _build_messages(history: list[Message], user_text: str, system_prompt: str) -> list[dict]:
@@ -75,6 +86,67 @@ def _inject_memories(system_prompt: str, memories: list[Memory]) -> str:
 
     block = "你记得的关于用户的事：\n" + "\n".join(lines)
     return f"{system_prompt}\n\n{block}"
+
+
+def _period_of_day(hour: int) -> str:
+    """0-23 时 → 中文时段。边界写死，便于单测。"""
+    if hour < 5:
+        return "凌晨"
+    if hour < 8:
+        return "早上"
+    if hour < 11:
+        return "上午"
+    if hour < 13:
+        return "中午"
+    if hour < 17:
+        return "下午"
+    if hour < 19:
+        return "傍晚"
+    if hour < 23:
+        return "晚上"
+    return "深夜"
+
+
+def _format_clock(now: datetime) -> str:
+    """当前时刻 → 中文文案。标注北京时间，防止模型按 UTC 二次换算。"""
+    weekday = _WEEKDAYS[now.weekday()]
+    return (
+        f"{now.year}年{now.month}月{now.day}日 {weekday} "
+        f"{_period_of_day(now.hour)}{now.hour:02d}:{now.minute:02d}（北京时间）"
+    )
+
+
+def _format_gap(seconds: float) -> str | None:
+    """距上次对话的间隔 → 自然语言。过短（< 6 小时）或负值（时钟回拨）返回 None。"""
+    if seconds < _TIME_GAP_NOTABLE_SECONDS:
+        return None
+    days, rem = divmod(int(seconds), 86400)
+    if days >= 1:
+        return f"距上次对话已过 {days} 天"
+    return f"距上次对话已过 {rem // 3600} 小时"
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """DB 时间归一为 aware UTC。
+
+    Postgres（timezone=True）返回 aware，原样返回；SQLite 会丢掉 tzinfo 且
+    func.now() 写的是 UTC 墙钟，故 naive 一律按 UTC 解释——两侧都归一后相减才安全。
+    """
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _inject_time(system_prompt: str, now: datetime, last_at: datetime | None) -> str:
+    """把时间感知块追加到 system prompt 末尾（记忆块之后，末尾权重更高）。"""
+    lines = [f"当前时间：{_format_clock(now)}。"]
+    if last_at is not None:
+        gap = _format_gap((now.astimezone(timezone.utc) - _as_utc(last_at)).total_seconds())
+        if gap:
+            lines.append(f"{gap}。")
+    lines.append(
+        "当用户询问当前时间或日期时，直接、精确地引用上面的当前时间作答，"
+        "不要估算、不要换成其他时间；其余情况自然体现时段即可，不要主动报时。"
+    )
+    return f"{system_prompt}\n\n时间信息：\n" + "\n".join(lines)
 
 
 async def _safe_add(memory, messages: list[dict], user_id: str, character_id: str) -> None:
@@ -207,6 +279,12 @@ class ChatCoreService:
                 logger.debug("记忆检索失败，降级为空")
                 memories = []
             system_prompt = _inject_memories(system_prompt, memories)
+
+        # 时间感知注入：放在记忆块之后。记忆非空时缓存分歧点已在记忆块起始处，边际代价为零；
+        # 记忆为空时会打断一次前缀缓存，约 1k token 重算（几十毫秒），远低于 1.5s 首字预算。
+        # last_at 取历史最新一条（落库本轮消息之前查询，故正是「上次对话」）。
+        last_at = history[-1].created_at if history else None
+        system_prompt = _inject_time(system_prompt, datetime.now(_TZ), last_at)
 
         messages = _build_messages(history, msg.content, system_prompt)
 

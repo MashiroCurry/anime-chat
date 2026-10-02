@@ -4,15 +4,23 @@
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select, update
 
 from app.core.messaging.channel import MessageCallback
 from app.core.messaging.exceptions import CODE_WECHAT_48H_LIMIT, ChannelException
 from app.core.messaging.types import ReplyResult, UnifiedMessage
 from app.db.session import async_session_factory
-from app.models import Character
+from app.models import Character, Message
 from app.services.chat import ChatCoreService
+from app.services.chat.core import (
+    _as_utc,
+    _format_clock,
+    _format_gap,
+    _period_of_day,
+)
 from app.services.memory.base import Memory
 
 
@@ -245,3 +253,118 @@ async def test_extraction_serialized_per_character():
 
     assert len(mem.added) == 2
     assert mem.max_active == 1, f"抽取发生了并发，max_active={mem.max_active}"
+
+
+# ---- 时间感知：纯函数 ----
+
+_WEEKDAYS_FOR_TEST = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+
+def test_period_of_day_boundaries():
+    assert _period_of_day(4) == "凌晨"
+    assert _period_of_day(5) == "早上"
+    assert _period_of_day(8) == "上午"
+    assert _period_of_day(11) == "中午"
+    assert _period_of_day(13) == "下午"
+    assert _period_of_day(17) == "傍晚"
+    assert _period_of_day(19) == "晚上"
+    assert _period_of_day(23) == "深夜"
+
+
+def test_format_clock_fixed():
+    now = datetime(2026, 10, 2, 22, 13)
+    out = _format_clock(now)
+    assert "2026年10月2日" in out
+    assert "22:13" in out
+    assert "晚上" in out
+    assert "北京时间" in out
+    # 星期期望值由 weekday() 推导，不硬编码（2026-10-02 是周五）
+    assert _WEEKDAYS_FOR_TEST[now.weekday()] in out
+
+
+def test_format_gap_threshold():
+    assert _format_gap(3600) is None
+    assert _format_gap(6 * 3600) == "距上次对话已过 6 小时"
+    assert _format_gap(3 * 86400) == "距上次对话已过 3 天"
+    assert _format_gap(-60) is None
+
+
+def test_as_utc_normalizes():
+    # naive → 按 UTC 解释，墙钟不变
+    naive = datetime(2026, 10, 2, 12, 0, 0)
+    out = _as_utc(naive)
+    assert out.tzinfo is not None
+    assert out.hour == 12 and out.minute == 0
+    # aware → 原样返回
+    aware = datetime(2026, 10, 2, 12, 0, 0, tzinfo=timezone(timedelta(hours=8)))
+    assert _as_utc(aware) is aware
+
+
+# ---- 时间感知：集成 ----
+
+@pytest.mark.anyio
+async def test_core_injects_time():
+    llm = FakeLLM(["好"])
+    core = ChatCoreService(llm, FakeMemory())
+    channel = FakeChannel()
+    await core.handle_message(_msg(), "sk-test", channel)
+
+    system = llm.messages[0]["content"]
+    assert "当前时间：" in system
+    assert str(datetime.now().year) in system
+
+
+@pytest.mark.anyio
+async def test_core_time_block_after_memory():
+    cid = await _create_character("小明", "测试")
+    memory = FakeMemory([Memory(memory_id="m1", content="用户喜欢猫", score=0.9)])
+    llm = FakeLLM(["好"])
+    core = ChatCoreService(llm, memory)
+    channel = FakeChannel()
+    await core.handle_message(_msg(cid), "sk-test", channel)
+
+    system = llm.messages[0]["content"]
+    assert system.index("你记得的关于用户的事") < system.index("当前时间")
+
+
+@pytest.mark.anyio
+async def test_core_no_gap_on_consecutive_turns():
+    llm = FakeLLM(["好"])
+    core = ChatCoreService(llm, FakeMemory())
+    channel = FakeChannel()
+    await core.handle_message(_msg(), "sk-test", channel)
+    assert "距上次对话" not in llm.messages[0]["content"]
+
+    # 紧接着第二轮：间隔秒级，仍不应出现「距上次对话」
+    session_id = channel.done[1]
+    m2 = UnifiedMessage(
+        user_id="local", session_id=session_id, content="你在吗",
+        timestamp=0.0, channel_type="ws", character_id=None,
+    )
+    await core.handle_message(m2, "sk-test", channel)
+    assert "距上次对话" not in llm.messages[0]["content"]
+
+
+@pytest.mark.anyio
+async def test_core_gap_after_absence():
+    llm = FakeLLM(["好"])
+    core = ChatCoreService(llm, FakeMemory())
+    channel = FakeChannel()
+    await core.handle_message(_msg(), "sk-test", channel)
+    session_id = channel.done[1]
+
+    # 把该会话最新一条消息的 created_at 回拨到 3 天前（写 aware UTC，符合 _as_utc 归一规则）
+    async with async_session_factory() as s:
+        await s.execute(
+            update(Message)
+            .where(Message.conversation_id == session_id)
+            .values(created_at=datetime.now(timezone.utc) - timedelta(days=3))
+        )
+        await s.commit()
+
+    m2 = UnifiedMessage(
+        user_id="local", session_id=session_id, content="我回来了",
+        timestamp=0.0, channel_type="ws", character_id=None,
+    )
+    await core.handle_message(m2, "sk-test", channel)
+    assert "距上次对话已过 3 天" in llm.messages[0]["content"]
