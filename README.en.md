@@ -186,5 +186,6 @@ npm run e2e:persist    # persistence regression: send → reload → history sti
 
 - A personal learning and self-hosting project using BYOK. No API keys are provided. **Never commit `.env` or key files** (already excluded by `.gitignore`).
 - Content moderation, rate limiting, and multi-tenancy are not implemented — do not expose this directly to the public internet.
-- Progress: M0 skeleton and streaming chat ✅ / M1a character system ✅ / M1b long-term memory ✅ / M2 Live2D ❌ abandoned / M3 memory panel and performance alignment ⏳ / M4 moderation, deployment, WeChat ⏳.
+- Progress: M0 skeleton and streaming chat ✅ / M1a character system ✅ / M1b long-term memory ✅ / M2 Live2D ❌ abandoned.
+- This is a **personal, single-user project**: future work is limited to what its owner actually uses. Multi-user support, content moderation, rate limiting, a character marketplace, and public deployment are out of scope.
 - Performance targets: LCP < 1.5s and TTI < 2s; keystroke to on-screen echo < 50ms; 60fps scrolling at 1000 messages; time to first token < 1.5s; heap growth < 50MB over 30 minutes of continuous chat.
