@@ -141,7 +141,22 @@ class ChatCoreService:
             if msg.session_id:
                 conversation = await session.get(Conversation, msg.session_id)
             if conversation is None:
-                conversation = Conversation()
+                # 一个角色一条长期会话：刷新/换设备后靠 character_id 自动接回，
+                # 前端即使不带 conversation_id 也不会丢上下文。
+                # character_id 为 None 是合法的锚点（无角色的默认会话）。
+                cond = (
+                    Conversation.character_id.is_(None)
+                    if msg.character_id is None
+                    else Conversation.character_id == msg.character_id
+                )
+                conversation = await session.scalar(
+                    select(Conversation)
+                    .where(cond)
+                    .order_by(Conversation.created_at.asc())
+                    .limit(1)
+                )
+            if conversation is None:
+                conversation = Conversation(character_id=msg.character_id)
                 session.add(conversation)
                 await session.flush()  # 拿到 conversation.id
 

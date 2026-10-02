@@ -20,6 +20,12 @@ class Conversation(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # 长期会话锚点：一个角色一条会话，刷新/换设备后靠它自动接回。
+    # 刻意不建外键：删角色不应连带销毁聊天记录（删除流程只有一个 confirm）。
+    # NULL 表示「无角色」的默认会话，也是合法的锚点。
+    character_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from loguru import logger
 
-from app.api.v1 import characters, health, memories, ws
+from app.api.v1 import characters, conversations, health, memories, ws
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.messaging.identity import SingleUserIdentityService
@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(ws.router, prefix="/api/v1")
     app.include_router(characters.router, prefix="/api/v1")
     app.include_router(memories.router, prefix="/api/v1")
+    app.include_router(conversations.router, prefix="/api/v1")
     return app
 
 

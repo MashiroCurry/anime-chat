@@ -18,6 +18,7 @@ const {
   connected,
   streaming,
   send,
+  connect,
   setApiKey,
   setCharacterId,
 } = useChat()
@@ -32,7 +33,16 @@ const currentCharacter = computed(
   () => characters.value.find((c) => c.id === characterId.value) ?? null,
 )
 
-onMounted(loadCharacters)
+onMounted(async () => {
+  await loadCharacters()
+  // 恢复上次选中的角色；若已被删除则退回无角色默认会话。
+  // setCharacterId 内部会拉该角色的历史消息，刷新后聊天记录不丢。
+  const stored = characterId.value
+  const valid = stored && characters.value.some((c) => c.id === stored) ? stored : null
+  setCharacterId(valid)
+  // 密钥已在 localStorage 时自动重连，刷新后输入框直接可用
+  connect()
+})
 
 async function loadCharacters(): Promise<void> {
   characters.value = await charactersApi.list()
