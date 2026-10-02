@@ -6,239 +6,48 @@ The design goal comes down to three words: **fluid, minimal, unobtrusive**. The 
 
 > 中文版：[README.md](README.md)
 
----
-
-## Table of Contents
-
-- [Status](#status)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Tech Stack](#tech-stack)
-- [Getting Started](#getting-started)
-- [Configuration](#configuration)
-- [WebSocket Protocol](#websocket-protocol)
-- [REST API](#rest-api)
-- [Project Structure](#project-structure)
-- [Testing](#testing)
-- [Roadmap](#roadmap)
-- [Notes](#notes)
-
----
-
-## Status
-
-| Milestone | Scope | Status |
-|---|---|---|
-| M0 | Skeleton + minimal streaming chat loop | ✅ |
-| M1a | Character system (card CRUD / import) | ✅ |
-| M1b | Long-term memory (mem0 + pgvector) | ✅ |
-| ~~M2~~ | ~~Live2D rendering~~ | ❌ Abandoned |
-| M3 | Memory management panel + performance targets | ⏳ |
-| M4 | Content moderation / deployment / WeChat integration | ⏳ |
-
-**Live2D was dropped.** This project is text-only; all rendering pipeline and emotion-mapping code has been removed. The messaging layer for a future WeChat integration is already stubbed out (see [Architecture](#architecture)).
-
----
-
 ## Features
 
-### Deeply customizable AI characters
+**Deeply customizable AI characters.** A character card is a JSONB structure: persona (identity, personality, speaking style, worldview, relationship with the user), example dialogues, greeting, plus per-character model params and memory recall count. Full CRUD and JSON import.
 
-A character card (`CharacterCard`) is a JSONB structure containing:
+**Permanent memory.** Built on self-hosted [mem0](https://github.com/mem0ai/mem0) with vectors stored in PostgreSQL's pgvector — no separate vector database to maintain. After each turn the exchange is extracted asynchronously (never blocking the reply); before the next turn the user message drives a semantic search whose results are appended to the system prompt. Search times out at 1.5s and any exception degrades to empty, so a dead embedding service never breaks chat; each memory is truncated to 200 chars with a 600-char total budget. Memories can be viewed and cleared from the settings drawer.
 
-- **Persona** — identity, personality, speaking style, worldview, relationship with the user
-- **Example dialogues** — few-shot turns that anchor tone
-- **Greeting** — first message when a session starts
-- **Model params** — each character can pin its own model and `temperature`
-- **Memory params** — independent toggle and recall count `top_k`
+**Persistent chat history.** One long-lived conversation per character — a page reload, a different browser, or a phone on the same Wi-Fi never loses the thread. The server anchors the conversation by `character_id`, so the frontend never has to remember a `conversation_id`; open the same LAN address on a phone, pick the character once, and you see the same conversation.
 
-Cards can be created, edited, deleted, or imported from JSON via the REST API.
-
-### Permanent memory
-
-Built on self-hosted [mem0](https://github.com/mem0ai/mem0), with vectors stored in PostgreSQL's `pgvector` extension — no separate vector database to maintain.
-
-- **Write path** — after each turn, the user message + assistant reply are dispatched asynchronously for memory extraction (`fire-and-forget`, never blocks the reply)
-- **Read path** — before each new turn, the user message is used for semantic search and recalled memories are appended to the end of the system prompt (higher recency weight)
-- **Graceful degradation** — search times out at 1.5s and any exception degrades to empty; a dead embedding service never breaks chat
-- **Token budget** — each memory truncated to 200 chars, 600 chars total injected
-- **Chinese extraction** — `memory_custom_instructions` forces memories to be recorded in Simplified Chinese
-
-Memories can be viewed and cleared from the settings drawer.
-
-### Bring Your Own Key (BYOK)
-
-API keys live **only in browser localStorage** and are sent in the WebSocket `auth` frame. The server holds them in connection memory only — **never persisted, never logged** (redaction lives in `backend/app/core/logging.py`).
-
-This means you can point it at any OpenAI-compatible API — DeepSeek, OpenAI, SiliconFlow, local Ollama — by changing only the base URL and model name.
-
----
-
-## Architecture
-
-### Three-layer messaging
-
-Core conversation logic is fully decoupled from transport. Adding WeChat later means adding one Adapter with zero changes to the core.
-
-```
-┌─────────────────────────────────────────────────────┐
-│ ChatCoreService (core layer)                         │
-│ LLM + memory + character cards. Knows nothing about  │
-│ where the message came from.                         │
-│ handle_message(UnifiedMessage, api_key, channel)     │
-└────────────────────┬────────────────────────────────┘
-                     │ depends on MessageChannel interface
-┌────────────────────┴────────────────────────────────┐
-│ MessageChannel (interface layer)                     │
-│ on_message + send_delta / send_done / send_error      │
-└────────────┬──────────────────────┬─────────────────┘
-             │                      │
-  ┌──────────▼──────────┐  ┌───────▼──────────┐
-  │ WebSocketAdapter     │  │ WeChatAdapter     │
-  │ (implemented)        │  │ (stub only)       │
-  └─────────────────────┘  └───────────────────┘
-```
-
-Key design decisions:
-
-- **`UnifiedMessage`** — the internal, channel-agnostic message shape carrying `user_id` / `session_id` / `content` / `channel_type` / `character_id`
-- **Streaming absorbed at the interface layer** — the core only ever calls `send_delta` / `send_done`; presentation differences belong to the Adapter. WebSocket pushes token by token, WeChat would accumulate and send once
-- **Async result callback** `on_reply(handler)` — after finishing a message, the core hands the complete reply to every listener, which is how a channel like WeChat gets full text for async push
-- **Identity mapping** `IdentityService` — external IDs (WeChat OpenID, etc.) map to an internal `user_id`; the core only knows internal IDs. Currently single-user, swappable for a DB-backed implementation
-- **`ChannelException`** — WeChat's 48-hour window limit and 5-second timeouts are raised as this type; the core recognizes it and degrades instead of crashing
-
-### Data flow of one conversation
-
-```
-User input
-  └─> WebSocketAdapter parses the frame into a UnifiedMessage
-        └─> ChatCoreService.handle_message
-              ├─ 1. Load character card (optional)
-              ├─ 2. Fetch conversation history (last 20 messages)
-              ├─ 3. Persist the user message
-              ├─ 4. Retrieve memories and inject into the system prompt
-              ├─ 5. Stream from the LLM → channel.send_delta per token
-              ├─ 6. Persist the assistant message → channel.send_done
-              ├─ 7. Fire on_reply callbacks with the complete result
-              └─ 8. Dispatch memory extraction asynchronously
-```
-
----
-
-## Tech Stack
-
-| Layer | Choice |
-|---|---|
-| Frontend | Vue 3 + Vite 6 + TypeScript; Naive UI only, auto-imported via `unplugin-vue-components` |
-| Backend | FastAPI + Python 3.11+ + SQLAlchemy 2.x (async) + Pydantic v2 |
-| Database | PostgreSQL 16 + pgvector |
-| Cache/Queue | Redis 7 |
-| Model gateway | [new-api](https://github.com/Calcium-Ion/new-api) (OpenAI-compatible; provisioned in M0, not yet on the critical path) |
-| Memory | Self-hosted mem0 (vector backend reuses pgvector) |
-| Migrations | Alembic |
-| Testing | pytest + pytest-asyncio |
-| Frontend E2E | Playwright |
-
-**The frontend component budget is a hard constraint**: at most 2 resident Naive UI components on the main screen (`n-input` + `n-button`), at most 5 in overlays, and under 50KB gzip for the whole library. The message list and bubbles are hand-written — no component library.
-
----
+**Bring Your Own Key (BYOK).** The key lives only in browser localStorage and travels in the WebSocket `auth` frame. The server holds it in connection memory only — never persisted, never logged. That means you can point it at any OpenAI-compatible API (DeepSeek, OpenAI, SiliconFlow, local Ollama) by changing only the base URL and model name.
 
 ## Getting Started
 
-### Prerequisites
-
-- **Docker Desktop** (for PostgreSQL / Redis / new-api)
-- **Python 3.11+** with [uv](https://github.com/astral-sh/uv)
-
-  ```bash
-  # Windows (PowerShell)
-  powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
-  # macOS / Linux
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
-
-- **Node.js 18+**
-
-### 1. Start infrastructure
+Prerequisites: Docker Desktop, Python 3.11+ with [uv](https://github.com/astral-sh/uv), Node.js 18+.
 
 ```bash
+# 1. Infrastructure: postgres(5432, with pgvector) / redis(6379) / new-api(3000)
 docker compose up -d
-```
 
-Brings up three containers: `companion-postgres` (5432, with pgvector), `companion-redis` (6379), `companion-new-api` (3000).
-
-> `docker-compose.yml` pins `name: companion` because the checkout directory has a non-ASCII name, which Compose can't use as a project name.
-
-### 2. Start the backend
-
-```bash
+# 2. Backend
 cd backend
-
-# Install dependencies (uv creates .venv automatically)
 uv sync
-
-# Configure environment (first run only — skip if .env exists, or you'll
-# overwrite the keys already in it)
-[ -f .env ] || cp ../.env.example .env
-# Edit .env, set LLM_API_KEY (local fallback only) and EMBEDDING_API_KEY
-
-# Run migrations
+[ -f .env ] || cp ../.env.example .env    # first run only; skip if it exists or you'll overwrite your keys
+# Edit .env, set LLM_API_KEY (local fallback) and EMBEDDING_API_KEY
 uv run alembic upgrade head
-
-# Start the server
 uv run uvicorn app.main:app --reload --port 8000
+
+# 3. Frontend
+cd frontend && npm install && npm run dev
 ```
 
-Health check: <http://127.0.0.1:8000/api/v1/health>
+Open <http://localhost:5173> and enter your API key in the settings drawer to start chatting. Health check: <http://127.0.0.1:8000/api/v1/health>.
 
-### 3. Start the frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open <http://localhost:5173> and enter your API key in the settings drawer to start chatting.
-
-The dev server proxies `/api` (including WebSockets) to `http://127.0.0.1:8000`.
-
-### One-command startup (optional, replaces steps 2–3)
-
-Once `backend/.env` is in place, start both processes with:
-
-```bash
-bash scripts/dev.sh
-```
-
-The script skips any port that's already in use (so you can restart just one side) and prints the LAN address for phone access. `Ctrl+C` stops both.
+Once `backend/.env` is in place, `bash scripts/dev.sh` starts both processes at once — it skips any port already in use (so you can restart just one side) and prints the LAN address for phone access.
 
 ### Phone / LAN access
 
-Vite is configured to listen on `0.0.0.0`, so a phone on the same Wi-Fi can reach it:
+Vite listens on `0.0.0.0`, so a phone on the same Wi-Fi can reach `http://<your-LAN-IP>:5173` (find it with `ipconfig`, the IPv4 address under the WLAN adapter).
 
-```bash
-# Find your LAN IP (look for the IPv4 address under your Wi-Fi adapter)
-ipconfig
-```
-
-Open `http://<LAN-IP>:5173` on the phone, e.g. `http://192.168.0.107:5173`.
-
-Three things to note:
-
-- The port is **5173** (frontend), not 8000 — the backend is not exposed to the LAN
-- The scheme is **http**, not https
+- The port is **5173** (frontend), not 8000 — the backend is not exposed to the LAN; the scheme is **http**, not https
 - Phone and computer must be on the **same** Wi-Fi (guest networks isolate devices)
 
-The backend does not need to listen on `0.0.0.0`, and no CORS setup is required: the phone only ever talks to Vite, which proxies `/api` (including WebSockets) to `127.0.0.1:8000` on the host machine — so from the browser's point of view every request is same-origin.
-
-If the phone can't connect, check in order:
-
-1. `netstat -ano | findstr :5173` — confirm the listen address is `0.0.0.0`, not `127.0.0.1`
-2. Confirm phone and computer are on the same Wi-Fi
-3. If Windows Firewall is on, allow Node through on private networks the first time it runs
-
----
+The backend does not need to listen on `0.0.0.0`, and no CORS setup is required: the phone only ever talks to Vite, which proxies `/api` (including WebSockets) to `127.0.0.1:8000` on the host machine, so every request is same-origin from the browser's point of view. If the phone can't connect, check in order: whether `netstat -ano | findstr :5173` reports `0.0.0.0` rather than `127.0.0.1`, whether both devices are on the same Wi-Fi, and whether Windows Firewall allows Node on private networks.
 
 ## Configuration
 
@@ -259,163 +68,123 @@ Settings are read from environment variables or `backend/.env` (pydantic-setting
 | `MEMORY_EXTRACT_ENABLED` | `true` | Memory write path toggle |
 | `DEBUG` | `true` | Debug mode |
 
-> ⚠️ **Embedding dimensions are locked in**: `hnsw` / `ivfflat` indexes cap `vector` at 2000 dimensions. Switching embedding models requires rebuilding all vectors — decide before deploying.
+> ⚠️ Embedding dimensions are locked in: `hnsw` / `ivfflat` indexes cap `vector` at 2000 dimensions. Switching embedding models requires rebuilding all vectors — decide before deploying.
 
----
+## Developer Reference
 
-## WebSocket Protocol
+| Layer | Choice |
+|---|---|
+| Frontend | Vue 3 + Vite 6 + TypeScript; Naive UI only, auto-imported on demand |
+| Backend | FastAPI + Python 3.11+ + SQLAlchemy 2.x (async) + Pydantic v2 |
+| Storage | PostgreSQL 16 + pgvector, Redis 7 |
+| Memory | Self-hosted mem0 (vector backend reuses pgvector) |
+| Model gateway | [new-api](https://github.com/Calcium-Ion/new-api) (OpenAI-compatible; provisioned, not yet on the critical path) |
+| Migrations / Testing | Alembic, pytest + pytest-asyncio, Playwright |
 
-Endpoint: `ws://127.0.0.1:8000/api/v1/ws/chat`
+> The frontend component budget is a hard constraint: at most 2 resident Naive UI components on the main screen (`n-input` + `n-button`) and at most 5 in overlays. The message list and bubbles are hand-written — no component library.
 
-### Client → Server
+### Architecture
+
+Core conversation logic is fully decoupled from transport. Adding WeChat later means adding one Adapter with zero changes to the core.
+
+```
+┌──────────────────────────────────────────────┐
+│ ChatCoreService (core layer)                  │
+│ LLM + memory + character cards. Knows nothing │
+│ about where the message came from.            │
+│ handle_message(UnifiedMessage, api_key, ch)   │
+└───────────────────┬──────────────────────────┘
+                    │ depends on MessageChannel
+┌───────────────────┴──────────────────────────┐
+│ MessageChannel: on_message +                  │
+│ send_delta / send_done / send_error           │
+└────────┬────────────────────────┬────────────┘
+   ┌─────▼──────┐         ┌───────▼───────┐
+   │ WebSocket  │         │ WeChat        │
+   │ (implemented)        │ (stub only)   │
+   └────────────┘         └───────────────┘
+```
+
+The path of one conversation: parse the frame → load the character card → fetch the last 20 messages → persist the user message → retrieve and inject memories → stream from the LLM (token by token) → persist the assistant message → fire `on_reply` callbacks → dispatch memory extraction asynchronously.
+
+Two things worth noting: **streaming is absorbed at the interface layer** — the core only calls `send_delta` / `send_done`, and presentation differences belong to the Adapter (WebSocket pushes token by token, WeChat would accumulate and send once); and **`ChannelException`** carries channel-specific limits like WeChat's 48-hour window, which the core recognizes and degrades on rather than crashing. The `IdentityService` maps external IDs (WeChat OpenID, etc.) to an internal `user_id`; it's a single-user implementation today.
+
+### WebSocket Protocol
+
+Endpoint: `ws://127.0.0.1:8000/api/v1/ws/chat`. Both sides share a Pydantic discriminated union contract (`backend/app/schemas/frames.py`); the frontend mirrors it in `frontend/src/api/frames.ts`.
 
 ```jsonc
-// Must be the first frame after connecting; carries the key
-{ "type": "auth", "api_key": "sk-..." }
-
-// Start a chat turn
+// Client → Server
+{ "type": "auth", "api_key": "sk-..." }   // must be the first frame after connecting
 { "type": "chat", "message": "hello", "character_id": "uuid", "conversation_id": "uuid" }
-
-// Keepalive
 { "type": "ping" }
-```
 
-### Server → Client
-
-```jsonc
-// Streaming delta
+// Server → Client
 { "type": "delta", "text": "he" }
-
-// Turn finished
 { "type": "done", "message_id": "uuid", "conversation_id": "uuid", "usage": null }
-
-// Error (message is already redacted)
-{ "type": "error", "code": "llm_error", "message": "..." }
+{ "type": "error", "code": "llm_error", "message": "..." }   // message is already redacted
 ```
 
-Both sides share a Pydantic discriminated union contract (`backend/app/schemas/frames.py`); the frontend mirrors it in `frontend/src/api/frames.ts`.
+The key travels in the `auth` frame rather than the URL query because the browser WebSocket API can't set custom headers, and a query string would land in access logs.
 
-### Why does the key travel in an `auth` frame?
-
-The browser WebSocket API can't set custom headers, and putting a key in the URL query would land it in access logs. So the key arrives in the first frame after connecting and is held only in connection memory.
-
----
-
-## REST API
+### REST API
 
 Prefix: `/api/v1`.
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Health check (includes DB connectivity) |
-| `GET` | `/characters` | List characters |
-| `POST` | `/characters` | Create a character |
-| `GET` | `/characters/{id}` | Character detail |
-| `PUT` | `/characters/{id}` | Update a character |
-| `DELETE` | `/characters/{id}` | Delete a character |
+| `GET` `POST` | `/characters` | List / create characters |
+| `GET` `PUT` `DELETE` | `/characters/{id}` | Detail / update / delete a character |
 | `POST` | `/characters/import` | Import a character from JSON |
-| `GET` | `/memories` | List memories |
+| `GET` | `/memories` | List memories (`character_id` required) |
 | `DELETE` | `/memories/{id}` | Delete one memory |
 | `DELETE` | `/memories` | Clear all memories |
-
----
+| `GET` | `/conversations/messages` | Recent messages of a character's conversation (`character_id` optional, `limit` defaults to 200, max 500) |
 
 ## Project Structure
 
 ```
-.
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/              # REST + WS routes
-│   │   ├── core/
-│   │   │   ├── config.py        # pydantic-settings config
-│   │   │   ├── logging.py       # loguru + secret redaction
-│   │   │   └── messaging/       # the three-layer architecture
-│   │   │       ├── types.py         # UnifiedMessage / ReplyResult
-│   │   │       ├── channel.py       # MessageChannel interface
-│   │   │       ├── exceptions.py    # ChannelException
-│   │   │       ├── identity.py      # IdentityService
-│   │   │       └── adapters/
-│   │   │           ├── websocket.py # WebSocketAdapter (implemented)
-│   │   │           └── wechat.py    # WeChatAdapter (stub)
-│   │   ├── db/                  # engine / session / Base
-│   │   ├── models/              # SQLAlchemy models
-│   │   ├── schemas/             # Pydantic models (incl. WS frame protocol)
-│   │   └── services/
-│   │       ├── chat/core.py     # ChatCoreService (core layer)
-│   │       ├── character/       # character card → system prompt
-│   │       ├── llm/             # OpenAI-compatible client
-│   │       └── memory/          # mem0 wrapper + Noop fallback
-│   ├── alembic/                 # database migrations
-│   └── tests/                   # 46 tests
-├── frontend/
-│   ├── src/
-│   │   ├── components/          # message list / bubble / input / settings drawer / character panel
-│   │   ├── composables/useChat.ts
-│   │   ├── api/                 # REST + WS clients
-│   │   └── views/CharacterEditor.vue
-│   └── e2e/                     # Playwright screenshot scripts
-├── scripts/
-│   └── dev.sh                   # start backend + frontend, print the phone-accessible URL
-├── screenshots/                 # per-milestone verification screenshots
-├── docker-compose.yml
-├── CLAUDE.md                    # project constraints (for AI coding tools)
-└── AI伴侣应用技术方案.md          # full technical design doc (Chinese)
+backend/
+  app/
+    api/v1/         REST + WS routes
+    core/           config / log redaction / messaging (three-layer architecture + adapters)
+    db/ models/     engine, SQLAlchemy models
+    schemas/        Pydantic models (incl. the WS frame protocol)
+    services/       chat (core layer) / character (card → prompt) / llm / memory (mem0 + Noop fallback)
+  alembic/          database migrations
+  tests/            53 tests
+frontend/
+  src/
+    components/     message list / bubble / input / settings drawer / character panel
+    composables/    useChat.ts (streaming render, history restore)
+    api/            REST + WS clients
+  e2e/              Playwright verification scripts
+scripts/dev.sh      start backend + frontend, print the phone-accessible URL
+screenshots/        per-milestone verification screenshots
 ```
-
----
 
 ## Testing
 
 ```bash
-cd backend
-uv run pytest -q
+cd backend && uv run pytest -q     # 53 tests
 ```
 
-All **46 tests pass** today, covering:
+Covering: end-to-end WebSocket chat, core-layer unit tests with no transport involved, no duplicated context when assembling prompts (incl. multi-turn regressions), conversation persistence (one conversation reused per character / isolation between characters / ordering and `limit`), character card CRUD and import, memory service and degradation, the three-layer architecture (identity mapping / channel exceptions / WeChat signature verification), and secret redaction in logs.
 
-- End-to-end WebSocket chat (`test_ws.py`)
-- Core layer unit tests with no transport involved (`test_chat_core.py`)
-- No duplicated context when assembling prompts (incl. multi-turn regression tests)
-- Character card CRUD and import (`test_characters.py`)
-- Memory service and degradation (`test_memories.py`)
-- Three-layer architecture: identity mapping, channel exceptions, WeChat signature verification (`test_messaging.py`)
-- Secret redaction in logs (`test_redact.py`)
+The suite requires PostgreSQL to be running. `conftest.py` blanks `EMBEDDING_API_KEY` before `.env` is read so tests never hit a real embedding API.
 
-> The suite requires PostgreSQL to be running. `conftest.py` blanks `EMBEDDING_API_KEY` before `.env` is read so tests never hit a real embedding API.
-
-Frontend screenshots:
+Frontend verification scripts (both servers must be running; the key is passed via the `COMPANION_API_KEY` env var):
 
 ```bash
 cd frontend
-npm run e2e:shot
+npm run e2e:shot       # UI screenshots at each viewport
+npm run e2e:persist    # persistence regression: send → reload → history still there
 ```
-
----
-
-## Roadmap
-
-| Milestone | Scope | Status |
-|---|---|---|
-| M0 | Skeleton + minimal streaming chat loop (FastAPI + DB + gateway) | ✅ |
-| M1a | Character system (card CRUD / import) | ✅ |
-| M1b | Memory (mem0 integration, Chinese extraction, retrieval injection, cleanup) | ✅ |
-| ~~M2~~ | ~~Live2D rendering~~ | ❌ Abandoned |
-| M3 | Memory management panel + performance targets | ⏳ |
-| M4 | Character marketplace, content moderation, load testing, deployment, WeChat | ⏳ |
-
-### Performance targets
-
-- First contentful paint LCP < 1.5s, TTI < 2s
-- Keystroke to on-screen echo < 50ms
-- 60fps scrolling at 1000 messages, no long task > 50ms
-- Time to first token < 1.5s
-- Heap growth < 50MB over 30 minutes of continuous chat
-
----
 
 ## Notes
 
-- This is a personal learning project using BYOK (Bring Your Own Key). No API keys are provided.
-- Never commit `.env` or key files (already excluded by `.gitignore`).
+- A personal learning and self-hosting project using BYOK. No API keys are provided. **Never commit `.env` or key files** (already excluded by `.gitignore`).
 - Content moderation, rate limiting, and multi-tenancy are not implemented — do not expose this directly to the public internet.
+- Progress: M0 skeleton and streaming chat ✅ / M1a character system ✅ / M1b long-term memory ✅ / M2 Live2D ❌ abandoned / M3 memory panel and performance alignment ⏳ / M4 moderation, deployment, WeChat ⏳.
+- Performance targets: LCP < 1.5s and TTI < 2s; keystroke to on-screen echo < 50ms; 60fps scrolling at 1000 messages; time to first token < 1.5s; heap growth < 50MB over 30 minutes of continuous chat.
