@@ -134,7 +134,8 @@ watch(
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-2);
+  /* 白底 + 浅灰边框，与主输入框（n-input）保持一致 */
+  background: var(--surface);
   color: var(--text);
   font-family: inherit;
   outline: none;
@@ -179,20 +180,20 @@ watch(
   padding: 0 2px;
 }
 .memory-del:hover {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 .reset-btn {
   margin-top: 8px;
   padding: 8px;
-  border: 1px solid #ff6b6b;
+  border: 1px solid var(--danger);
   border-radius: 8px;
   background: transparent;
-  color: #ff6b6b;
+  color: var(--danger);
   cursor: pointer;
   font-size: 13px;
 }
 .reset-btn:hover {
-  background: rgba(255, 107, 107, 0.1);
+  background: var(--danger-soft);
 }
 .footer-actions {
   display: flex;
@@ -214,6 +215,10 @@ watch(
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 </style>

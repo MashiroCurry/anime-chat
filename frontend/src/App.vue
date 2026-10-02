@@ -198,7 +198,7 @@ function onImportFile(e: Event): void {
   align-items: center;
   justify-content: center;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 20px;
   flex-shrink: 0;
 }
@@ -220,8 +220,9 @@ function onImportFile(e: Event): void {
   font-size: 12px;
   color: var(--text-dim);
 }
+/* 白底小字用 --accent-hover：--accent 在白底仅 3.5:1，正文字号不达标 */
 .character-status.online {
-  color: var(--accent);
+  color: var(--accent-hover);
 }
 .icon-btn {
   width: 36px;
@@ -253,7 +254,7 @@ function onImportFile(e: Event): void {
   cursor: pointer;
 }
 .import-btn:hover {
-  color: var(--accent);
+  color: var(--accent-hover);
   border-color: var(--accent);
 }
 </style>

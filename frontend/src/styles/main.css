@@ -1,15 +1,27 @@
-/* 全局样式与主题变量（主色 ≤3 种 + 中性色，CLAUDE.md B 节） */
+/* 全局样式与主题变量（主色 ≤3 种 + 中性色，CLAUDE.md B 节）。
+   浅色单模式；色值必须与 styles/theme.ts 的 themeOverrides 保持同步
+   （那边不能用 var()，seemly 的颜色解析遇到 var() 会抛错）。 */
 :root {
-  /* 中性色 */
-  --bg: #0f1115;
-  --surface: #171a21;
-  --surface-2: #1f242e;
-  --border: #2a303c;
-  --text: #e6e9ef;
-  --text-dim: #8b93a3;
+  color-scheme: light;
 
-  /* 主色（1 个 accent，严格 ≤3 种） */
-  --accent: #5b8cff;
+  /* 中性色 */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f3f4f6;
+  --border: #e5e7eb;
+  --scrollbar: #d1d5db;
+  --text: #1f2937;
+  --text-dim: #6b7280;
+
+  /* 主色（粉色，只用于按钮 / 焦点 / 激活态，禁止用于气泡和大面积背景） */
+  --accent: #ec4899;
+  --accent-hover: #db2777;
+  --accent-soft: rgba(236, 72, 153, 0.1);
+  --on-accent: #ffffff;
+
+  /* 危险色（白底可读；旧 #ff6b6b 仅 2.9:1） */
+  --danger: #dc2626;
+  --danger-soft: rgba(220, 38, 38, 0.08);
 }
 
 * {
@@ -40,6 +52,6 @@ body {
   width: 6px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--scrollbar);
   border-radius: 3px;
 }

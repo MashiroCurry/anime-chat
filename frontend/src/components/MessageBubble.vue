@@ -33,13 +33,15 @@ defineProps<{ message: ChatMessage }>()
   white-space: pre-wrap;
   word-break: break-word;
 }
+/* 粉色禁止用于消息气泡（CLAUDE.md 硬性约束），两侧都用中性色区分 */
 .user .bubble {
-  background: var(--accent);
-  color: #fff;
+  background: var(--surface-2);
+  color: var(--text);
   border-bottom-right-radius: 4px;
 }
 .assistant .bubble {
-  background: var(--surface-2);
+  background: var(--surface);
+  border: 1px solid var(--border);
   color: var(--text);
   border-bottom-left-radius: 4px;
 }

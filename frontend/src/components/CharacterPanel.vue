@@ -68,12 +68,12 @@ function brief(c: Character): string {
 }
 .item.active {
   border-color: var(--accent);
-  background: rgba(91, 140, 255, 0.12);
+  background: var(--accent-soft);
 }
 .item.create {
   justify-content: center;
   border-style: dashed;
-  color: var(--accent);
+  color: var(--accent-hover);
   background: transparent;
 }
 .item-main {
@@ -103,7 +103,7 @@ function brief(c: Character): string {
   color: var(--text);
 }
 .action.danger:hover {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 .empty {
   padding: 12px;

@@ -147,7 +147,8 @@ function submit(): void {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-2);
+  /* 白底 + 浅灰边框，与主输入框（n-input）保持一致 */
+  background: var(--surface);
   color: var(--text);
   font-family: inherit;
   font-size: 14px;
@@ -185,8 +186,11 @@ function submit(): void {
   border: none;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   font-size: 14px;
+}
+.primary:hover {
+  background: var(--accent-hover);
 }
 </style>

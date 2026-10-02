@@ -63,7 +63,8 @@
 - 消息列表、消息气泡必须自己实现，禁止使用组件库。
 - 禁止把聊天、角色、消息流等核心功能藏进浮层。
 - 禁止使用 `n-data-table`、`n-form`、`n-modal`、`n-card`、`n-layout`。
-- 所有 Naive UI 组件必须包裹在 `<n-config-provider>` 中，主题用 `darkTheme` 或自定义。
+- 所有 Naive UI 组件必须包裹在 `<n-config-provider>` 中，主题用 `lightTheme` + `src/styles/theme.ts` 的 `themeOverrides`（浅色单模式）。
+- 色值只有两处真相：`src/styles/main.css` 的 `:root` 和 `src/styles/theme.ts`，两处必须同步（override 里不能用 `var()`）。
 - 必须用 `unplugin-vue-components` 自动按需引入，**禁止全量引入**。
 
 ## 工作方式
