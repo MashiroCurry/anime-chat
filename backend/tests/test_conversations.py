@@ -7,6 +7,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 
 from app.api.v1.conversations import get_conversation_messages
 from app.db.session import async_session_factory
@@ -157,3 +158,73 @@ async def test_messages_ordered_ascending_and_limited():
     assert out.conversation_id == conv.id
     # 最近 2 条，且为正序
     assert [m.content for m in out.messages] == ["第二句", "第三句"]
+
+
+# ---- 清空聊天记录（只删会话/消息，不碰 mem0 记忆）----
+
+
+def test_clear_messages_only_for_that_character(monkeypatch):
+    """清空 A 只影响 A，B 的历史与 A 的角色本身都不动。"""
+    monkeypatch.setattr("app.main.get_llm_provider", lambda: FakeLLM(["喵"]))
+    with TestClient(app) as client:
+        a = _create(client, "A")
+        b = _create(client, "B")
+        _say(client, "给A的", a)
+        _say(client, "给B的", b)
+
+        r = client.delete("/api/v1/conversations/messages", params={"character_id": a})
+        assert r.status_code == 204, r.text
+
+        ra = _history(client, a)
+        rb = _history(client, b)
+        assert ra["messages"] == []
+        assert sorted([m["content"] for m in rb["messages"]]) == sorted(["给B的", "喵"])
+        # A 角色本身还在（清聊天记录 ≠ 删角色）
+        assert client.get(f"/api/v1/characters/{a}").status_code == 200
+
+
+async def test_clear_messages_really_deletes_rows(monkeypatch):
+    """直接查库确认：会话与消息行真的没了，不依赖 SQLite 外键级联。"""
+    monkeypatch.setattr("app.main.get_llm_provider", lambda: FakeLLM(["好"]))
+    with TestClient(app) as client:
+        cid = _create(client, "小明")
+        _say(client, "第一句", cid)
+        r = client.delete("/api/v1/conversations/messages", params={"character_id": cid})
+        assert r.status_code == 204, r.text
+
+    async with async_session_factory() as s:
+        conv = await s.scalar(
+            select(Conversation).where(Conversation.character_id == cid)
+        )
+        assert conv is None, "会话行仍存在"
+        count = (await s.execute(select(func.count()).select_from(Message))).scalar()
+        assert count == 0, "messages 表里还有残留行"
+
+
+def test_clear_messages_idempotent():
+    """没聊过也返回 204，不是 404。"""
+    with TestClient(app) as client:
+        r = client.delete(
+            "/api/v1/conversations/messages", params={"character_id": "不存在"}
+        )
+        assert r.status_code == 204
+
+
+def test_clear_then_next_message_starts_fresh(monkeypatch):
+    """清空后再发一条，历史只剩新这一条（会话已重置）。"""
+    monkeypatch.setattr("app.main.get_llm_provider", lambda: FakeLLM(["新"]))
+    with TestClient(app) as client:
+        cid = _create(client, "小明")
+        _say(client, "旧的第一句", cid)
+        assert (
+            client.delete(
+                "/api/v1/conversations/messages", params={"character_id": cid}
+            ).status_code
+            == 204
+        )
+        _say(client, "新的第一句", cid)
+        body = _history(client, cid)
+
+    assert sorted([m["content"] for m in body["messages"]]) == sorted(
+        ["新的第一句", "新"]
+    )

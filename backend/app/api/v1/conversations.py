@@ -5,7 +5,7 @@
 """
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session
@@ -66,3 +66,37 @@ async def get_conversation_messages(
         conversation_id=conversation.id,
         messages=[_to_out(m) for m in reversed(rows)],
     )
+
+
+@router.delete("/messages", status_code=204)
+async def clear_conversation_messages(
+    character_id: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    """清空某角色的聊天记录（只删 conversations/messages，不碰 mem0 记忆）。
+
+    幂等：没聊过也返回 204，与 GET 的「没聊过是正常态」一致。
+    """
+    if not character_id:
+        character_id = None
+
+    cond = (
+        Conversation.character_id.is_(None)
+        if character_id is None
+        else Conversation.character_id == character_id
+    )
+    conversation = await session.scalar(
+        select(Conversation)
+        .where(cond)
+        .order_by(Conversation.created_at.asc())
+        .limit(1)
+    )
+    if conversation is None:
+        return
+
+    # 先显式删消息，再删会话：不依赖 SQLite 是否开启外键级联（PRAGMA foreign_keys）
+    await session.execute(
+        delete(Message).where(Message.conversation_id == conversation.id)
+    )
+    await session.delete(conversation)
+    await session.commit()

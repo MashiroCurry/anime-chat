@@ -36,4 +36,12 @@ export const conversationsApi = {
         ? `${BASE}/messages?character_id=${encodeURIComponent(characterId)}&limit=${limit}`
         : `${BASE}/messages?limit=${limit}`,
     ),
+  // 清空某角色的聊天记录（只删会话/消息，不碰记忆）。返回 204 → undefined
+  clear: (characterId: string | null) =>
+    req<void>(
+      characterId
+        ? `${BASE}/messages?character_id=${encodeURIComponent(characterId)}`
+        : `${BASE}/messages`,
+      { method: 'DELETE' },
+    ),
 }

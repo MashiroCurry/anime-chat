@@ -21,6 +21,7 @@ const {
   connect,
   setApiKey,
   setCharacterId,
+  clearHistory,
 } = useChat()
 
 const showSettings = ref(false)
@@ -172,7 +173,9 @@ function onImportFile(e: Event): void {
       v-model="showSettings"
       :api-key="apiKey"
       :character-id="characterId"
+      :streaming="streaming"
       @save="setApiKey"
+      @clear-history="clearHistory"
     />
   </div>
 </template>

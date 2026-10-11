@@ -184,6 +184,19 @@ export function useChat() {
     if (key) connect()
   }
 
+  /** 清空当前角色的聊天记录（后端只删会话/消息，不碰记忆）。 */
+  async function clearHistory(): Promise<void> {
+    historySeq++ // 作废在途的历史拉取，避免它返回时覆盖清空后的状态
+    try {
+      await conversationsApi.clear(characterId.value)
+    } catch (err) {
+      lastError.value = (err as Error).message
+      return
+    }
+    conversationId = null
+    messages.value = []
+  }
+
   return {
     messages,
     apiKey,
@@ -197,5 +210,6 @@ export function useChat() {
     send,
     setApiKey,
     setCharacterId,
+    clearHistory,
   }
 }

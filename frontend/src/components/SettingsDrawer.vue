@@ -4,10 +4,16 @@ import { ref, watch } from 'vue'
 
 import { memoriesApi, type Memory } from '../api/memories'
 
-const props = defineProps<{ modelValue: boolean; apiKey: string; characterId: string | null }>()
+const props = defineProps<{
+  modelValue: boolean
+  apiKey: string
+  characterId: string | null
+  streaming: boolean
+}>()
 const emit = defineEmits<{
   'update:modelValue': [v: boolean]
   save: [key: string]
+  'clear-history': []
 }>()
 
 const draft = ref(props.apiKey)
@@ -62,6 +68,11 @@ async function resetMemories(): Promise<void> {
   }
 }
 
+function clearChatHistory(): void {
+  if (!confirm('清空当前角色的聊天记录？设置里的记忆不受影响。')) return
+  emit('clear-history')
+}
+
 // 打开抽屉且有角色时加载记忆
 watch(
   () => props.modelValue,
@@ -90,6 +101,14 @@ watch(
         />
         <p class="field-hint">
           密钥只保存在你的浏览器（localStorage），随 WebSocket 首帧发送，服务端不落盘。
+        </p>
+      </div>
+
+      <div v-if="characterId" class="settings-field chat-history">
+        <label class="field-label">聊天记录</label>
+        <button class="reset-btn" :disabled="streaming" @click="clearChatHistory">清空聊天记录</button>
+        <p class="field-hint">
+          {{ streaming ? '回复进行中，请等回复结束后再操作。' : '只清除当前角色的聊天记录，不影响长期记忆。' }}
         </p>
       </div>
 
@@ -122,7 +141,8 @@ watch(
   flex-direction: column;
   gap: 8px;
 }
-.memories {
+.memories,
+.chat-history {
   margin-top: 20px;
 }
 .field-label {
@@ -194,6 +214,10 @@ watch(
 }
 .reset-btn:hover {
   background: var(--danger-soft);
+}
+.reset-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 .footer-actions {
   display: flex;

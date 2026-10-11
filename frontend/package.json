@@ -8,7 +8,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "e2e:shot": "node e2e/screenshot.mjs",
-    "e2e:persist": "node e2e/persist-shot.mjs"
+    "e2e:persist": "node e2e/persist-shot.mjs",
+    "e2e:clear": "node e2e/clear-shot.mjs"
   },
   "dependencies": {
     "naive-ui": "^2.42.0",
