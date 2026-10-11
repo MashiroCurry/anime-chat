@@ -255,6 +255,33 @@ async def test_extraction_serialized_per_character():
     assert mem.max_active == 1, f"抽取发生了并发，max_active={mem.max_active}"
 
 
+@pytest.mark.anyio
+async def test_extraction_uses_only_user_message():
+    """记忆抽取只传用户消息，助手回复不参与；短句/代词原样传给 mem0。"""
+    cid = await _create_character("小明", "测试")
+    mem = FakeMemory()
+    core = ChatCoreService(FakeLLM(["好"]), mem)
+    channel = FakeChannel()
+
+    await core.handle_message(_msg(cid), "sk-test", channel)
+    # 依赖上下文的短句：即使 mem0 提不出事实，也必须原样只传用户消息
+    short = UnifiedMessage(
+        user_id="local", session_id=None, content="是的，就那个",
+        timestamp=0.0, channel_type="ws", character_id=cid,
+    )
+    await core.handle_message(short, "sk-test", channel)
+
+    await asyncio.gather(*list(core._extract_tasks))
+
+    assert [m for m, _u, _c in mem.added] == [
+        [{"role": "user", "content": "你好"}],
+        [{"role": "user", "content": "是的，就那个"}],
+    ]
+    # 任何一条都不含 assistant 角色
+    for messages, _u, _c in mem.added:
+        assert all(m["role"] == "user" for m in messages)
+
+
 # ---- 时间感知：纯函数 ----
 
 _WEEKDAYS_FOR_TEST = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")

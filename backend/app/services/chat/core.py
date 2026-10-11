@@ -177,26 +177,31 @@ class ChatCoreService:
         """
         self._reply_handlers.append(handler)
 
-    def _spawn_extraction(self, user_text: str, assistant_text: str, character_id: str) -> None:
+    def _spawn_extraction(self, user_text: str, character_id: str) -> None:
         """投递记忆抽取任务：同角色串行化，任务持引用防 GC。"""
         lock = self._extract_locks.setdefault(character_id, asyncio.Lock())
         task = asyncio.create_task(
-            self._extract(lock, user_text, assistant_text, character_id)
+            self._extract(lock, user_text, character_id)
         )
         self._extract_tasks.add(task)
         task.add_done_callback(self._extract_tasks.discard)
 
     async def _extract(
-        self, lock: asyncio.Lock, user_text: str, assistant_text: str, character_id: str
+        self, lock: asyncio.Lock, user_text: str, character_id: str
     ) -> None:
-        """在锁内执行抽取，保证同一角色的抽取不并发。"""
+        """在锁内执行抽取，保证同一角色的抽取不并发。
+
+        只抽用户消息，助手回复不参与：mem0 对消息列表以最后一条为主抽取源，
+        若把助手回复喂进去会以助手人设为源，污染长期记忆。
+
+        取舍：短句/代词回复（如「是的」「就那个」）本身不含新的长期事实，其
+        指向的事实在前一轮用户完整说出时已被抽取；宁可在极少数场景漏抽，也
+        不要让助手人设污染长期记忆。
+        """
         async with lock:
             await _safe_add(
                 self._memory,
-                [
-                    {"role": "user", "content": user_text},
-                    {"role": "assistant", "content": assistant_text},
-                ],
+                [{"role": "user", "content": user_text}],
                 DEFAULT_OWNER_ID,
                 character_id,
             )
@@ -338,4 +343,4 @@ class ChatCoreService:
         # 记忆抽取投递（写路径）：fire-and-forget，不阻塞主流程。
         # 可靠性：同角色串行化（防并发写重复），任务持引用（防 GC 中途消失）。
         if settings.memory_extract_enabled and msg.character_id:
-            self._spawn_extraction(msg.content, full_text, msg.character_id)
+            self._spawn_extraction(msg.content, msg.character_id)
