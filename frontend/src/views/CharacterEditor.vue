@@ -49,6 +49,10 @@ function submit(): void {
           <textarea v-model="card.persona.identity" class="input" rows="3" placeholder="它是谁？有什么背景？" />
         </label>
         <label class="field">
+          <span class="label">生日</span>
+          <input v-model="card.persona.birthday" class="input" placeholder="比如：7月14日" />
+        </label>
+        <label class="field">
           <span class="label">性格</span>
           <textarea v-model="card.persona.personality" class="input" rows="2" placeholder="性格标签与描述" />
         </label>

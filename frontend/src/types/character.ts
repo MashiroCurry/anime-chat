@@ -2,6 +2,7 @@
 
 export interface Persona {
   identity: string
+  birthday: string
   personality: string
   speaking_style: string
   worldview: string
@@ -45,7 +46,7 @@ export interface Character {
 // 新建空角色卡的默认值
 export function emptyCard(): CharacterCard {
   return {
-    persona: { identity: '', personality: '', speaking_style: '', worldview: '', relationship: '' },
+    persona: { identity: '', birthday: '', personality: '', speaking_style: '', worldview: '', relationship: '' },
     examples: [],
     greeting: '',
     llm: { model: 'deepseek-chat', temperature: 0.8 },

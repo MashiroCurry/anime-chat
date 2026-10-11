@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class Persona(BaseModel):
     identity: str = ""
+    birthday: str = ""
     personality: str = ""
     speaking_style: str = ""
     worldview: str = ""

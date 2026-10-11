@@ -11,6 +11,7 @@ def build_system_prompt(name: str, card: CharacterCard) -> str:
     # 字段顺序即渲染顺序，空字段跳过
     field_labels = [
         ("identity", "身份"),
+        ("birthday", "生日"),
         ("personality", "性格"),
         ("speaking_style", "说话风格"),
         ("worldview", "世界观"),

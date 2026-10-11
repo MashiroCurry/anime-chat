@@ -39,7 +39,16 @@ def test_build_system_prompt_skips_empty():
     text = build_system_prompt("R2", card)
     assert "【身份】机器人" in text
     assert "【性格】" not in text  # 空字段省略
+    assert "【生日】" not in text  # 空生日同样省略
     assert "【对话示例】" not in text  # 无示例
+
+
+def test_build_system_prompt_renders_birthday():
+    card = CharacterCard(persona=Persona(identity="高中生", birthday="7月14日"))
+    text = build_system_prompt("妃爱", card)
+    assert "【生日】7月14日" in text
+    # 生日紧跟在身份之后
+    assert text.index("【身份】") < text.index("【生日】")
 
 
 # ---- parse_character_card 单元测试 ----
